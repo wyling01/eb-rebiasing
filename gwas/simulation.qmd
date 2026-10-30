@@ -1,0 +1,83 @@
+---
+title: "GWAS simulation under LD"
+format:
+  html:
+    embed-resources: true
+params:
+  rerun: true
+  n_replicates: 400
+---
+
+# Setup
+
+Direct effects are zero, with parental variance targets of 0.5% and 1%
+and 400 phenotype replicates per condition.
+
+```{r}
+#| message: false
+library(data.table)
+library(knitr)
+
+parental_variances <- c(0.005, 0.01)
+result_root <- "results/simulation"
+```
+
+# Phenotypes and GWAS
+
+```{r}
+#| label: run-simulation
+if (params$rerun) {
+  source("simulation.R")
+  data <- load_simulation_data()
+  for (v in parental_variances) {
+    run_null_study(data, v, params$n_replicates,
+                   file.path(result_root, paste0("parental_", v)))
+  }
+}
+```
+
+# FDR and p-value calibration
+
+Empirical FDR is the proportion of replicates with at least one BH rejection
+at 0.05. Population Z is also evaluated against the direct-effect null.
+
+```{r}
+method_names <- c(npmle = "RB-NPMLE", parametric = "RB-Normal",
+                  direct_z = "Direct-effect", population_z = "Population-effect")
+if (params$rerun) {
+  for (name in c("summary.tsv", "pvalue_tails.tsv")) {
+    tables <- lapply(parental_variances, function(v) {
+      path <- file.path(result_root, paste0("parental_", v), name)
+      data.table(parental_variance = v, fread(path))
+    })
+    fwrite(rbindlist(tables), file.path(result_root, name), sep = "\t")
+  }
+}
+results_available <- all(file.exists(file.path(result_root,
+                                               c("summary.tsv", "pvalue_tails.tsv"))))
+if (results_available) {
+  summary_table <- fread(file.path(result_root, "summary.tsv"))
+  tail_table <- fread(file.path(result_root, "pvalue_tails.tsv"))
+  kable(summary_table[, .(
+    `Parental variance` = paste0(100 * parental_variance, "%"),
+    Method = unname(method_names[method]),
+    FDR = sprintf("%.4f", fdr),
+    `95% CI` = sprintf("(%.4f, %.4f)", fdr_ci_lower, fdr_ci_upper),
+    `P(p < 0.05)` = sprintf("%.4f", p_lt_0_05_proportion)
+  )])
+} else {
+  cat("No simulation results yet. Prepare the inputs as described in README.md,\n",
+      "then run: quarto render simulation.qmd\n")
+}
+```
+
+```{r}
+if (results_available) {
+  kable(tail_table[, .(
+    `Parental variance` = paste0(100 * parental_variance, "%"),
+    Method = unname(method_names[method]), Threshold = threshold,
+    Proportion = signif(proportion, 4),
+    `95% CI` = sprintf("(%.5f, %.5f)", ci_lower, ci_upper)
+  )])
+}
+```

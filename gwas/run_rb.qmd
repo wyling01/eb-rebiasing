@@ -1,0 +1,377 @@
+---
+title: "Run RB"
+format: html
+---
+
+```{r}
+#| label: load-pkgs
+#| code-summary: "Packages"
+#| message: false
+library(MASS)
+library(ggplot2)
+library(reshape2)
+library(knitr)
+library(progress)
+library(REBayes)
+```
+
+
+
+```{r}
+source("functions.R")
+plink2_bin <- Sys.getenv("PLINK2", unset = "plink2")
+sumstats_file <- "merged_nofilter.sumstats"
+dir.create("results", recursive = TRUE, showWarnings = FALSE)
+```
+
+```{r}
+
+bfile_in <- "ldref/1000G/EUR"
+bfile <- "ldref/1000G/EUR.chrpos"
+
+cmd <- c(
+    "--bfile", bfile_in,
+    "--set-all-var-ids", "@:#",
+    "--make-bed",
+    "--out", bfile
+)
+
+if (!file.exists(paste0(bfile, ".bim"))) {
+  stopifnot(system2(plink2_bin, args = cmd) == 0)
+}
+```
+
+# Load data
+
+```{r}
+library(data.table)
+
+match_sumstats_to_1000G_EUR <- function(
+    sumstats_file,
+    bfile,
+    out_file
+  ) {
+    sumstats <- fread(sumstats_file)
+
+    sumstats[, `:=`(
+      chromosome = as.integer(chromosome),
+      pos = as.integer(pos),
+      chr_pos = paste0(chromosome, ":", pos)
+    )]
+
+    sumstats <- sumstats[complete.cases(sumstats)]
+
+    bim <- fread(paste0(bfile, ".bim"), header = FALSE)
+    setnames(bim, c("chromosome", "chr_pos", "cm", "pos", "a1", "a2"))
+
+    matched <- sumstats[chr_pos %in% bim$chr_pos]
+
+    fwrite(matched, out_file, sep = "\t")
+}
+
+match_sumstats_to_1000G_EUR(
+    sumstats_file = sumstats_file,
+    bfile = "ldref/1000G/EUR.chrpos",
+    out_file = "height_matched_to_1000GEUR.sumstats"
+)
+
+```
+
+```{r}
+sumstats_clean <- read.table("height_matched_to_1000GEUR.sumstats", header = TRUE)
+```
+
+```{r}
+hat_beta_g_set <- sumstats_clean$direct_Beta
+hat_delta_g_set <- sumstats_clean$avg_NTC_Beta
+se_beta_set <-  sumstats_clean$direct_SE
+se_delta_set <- sumstats_clean$avg_NTC_SE
+corr_set <- sumstats_clean$r_direct_avg_NTC
+G <- length(hat_beta_g_set)
+```
+
+```{r}
+result <- GNmix_diffvar(hat_delta_g_set, se_delta_set, u = 300)
+save(result, file = "results/result.RData")
+value <- as.matrix(result$u)
+probability <- result$fu
+```
+
+
+```{r}
+parametric_prior <-estimate_parametric_mle(hat_delta_g_set,se_delta_set)
+```
+
+
+Running the following chunk generates the data for Figures 2 and S3 and saves it to
+the following CSV files under `results/`.
+
+- `gwas_bias_se_pt.csv`
+- `gwas_npmle_pt.csv`
+- `gwas_param_pt.csv`
+- `height_gwas_bias_nuisance.csv`
+
+```{r}
+#| label: export-gwas-csv
+
+stopifnot(
+  all(is.finite(c(hat_delta_g_set, se_delta_set, corr_set, se_beta_set))),
+  all(se_delta_set > 0), all(se_beta_set > 0),
+  length(value) > 0L, length(value) == length(probability),
+  all(is.finite(value)), all(is.finite(probability)),
+  all(probability >= 0), is.finite(sum(probability)), sum(probability) > 0,
+  is.finite(parametric_prior$hat_mu_b),
+  is.finite(parametric_prior$hat_var_b), parametric_prior$hat_var_b >= 0
+)
+
+csv_exports <- list(
+  gwas_bias_se_pt.csv = data.frame(
+    bias = hat_delta_g_set,
+    bias_sd = se_delta_set
+  ),
+  gwas_npmle_pt.csv = data.frame(
+    atom = as.numeric(value),
+    weight = as.numeric(probability) / sum(probability)
+  ),
+  gwas_param_pt.csv = data.frame(
+    hat_mu_b = parametric_prior$hat_mu_b,
+    hat_var_b = parametric_prior$hat_var_b
+  ),
+  height_gwas_bias_nuisance.csv = data.frame(
+    bias_hat = hat_delta_g_set,
+    rho = corr_set,
+    tau2 = se_delta_set^2,
+    sigma2 = se_beta_set^2
+  )
+)
+
+for (filename in names(csv_exports)) {
+  output_file <- file.path("results", filename)
+  write.csv(csv_exports[[filename]], output_file, row.names = FALSE, quote = FALSE)
+  message("Saved ", nrow(csv_exports[[filename]]), " rows to ", output_file)
+}
+```
+
+```{r}
+p_set <- numeric(G)
+p_set_param <- numeric(G)
+p_set_z <- numeric(G)
+for(i in 1:G){
+  p_value <- cal_p_value_npmle_diffvar(value,probability,hat_beta_g_set[i],hat_delta_g_set[i],se_beta_set[i],se_delta_set[i],corr_set[i])
+  p_set[i] <-  p_value
+  
+  
+  p_value_param <- cal_p_value_param_diffvar(parametric_prior$hat_mu_b,parametric_prior$hat_var_b,hat_beta_g_set[i],hat_delta_g_set[i],se_beta_set[i],se_delta_set[i],corr_set[i])
+  p_set_param[i] <-  p_value_param
+  
+  p_value_z <- cal_p_value_z_diffvar(hat_beta_g_set[i],se_beta_set[i])
+  p_set_z[i] <- p_value_z
+}
+
+p_set_pop_z <- numeric(G)
+for(i in 1:G){  
+  p_value_pop_z <- cal_p_value_z_diffvar(sumstats_clean$population_Beta[i],sumstats_clean$population_SE[i])
+  p_set_pop_z[i] <- p_value_pop_z
+}
+```
+
+
+```{r}
+significance <- BH_adjust(p_set,alpha = 0.05)
+significance_param <- BH_adjust(p_set_param,alpha = 0.05)
+significance_z <- BH_adjust(p_set_z,alpha = 0.05)
+significance_pop_z <- BH_adjust(p_set_pop_z,alpha = 0.05)
+
+discovery_threshold <- function(p, flag) {
+  if (any(flag)) max(p[flag]) else NA_real_
+}
+bh_threshold <- discovery_threshold(p_set, significance)
+bh_threshold_param <- discovery_threshold(p_set_param, significance_param)
+bh_threshold_z <- discovery_threshold(p_set_z, significance_z)
+bh_threshold_pop_z <- discovery_threshold(p_set_pop_z, significance_pop_z)
+```
+
+
+```{r}
+print(sum(significance))
+print(sum(significance_param))
+print(sum(significance_z))
+print(sum(significance_pop_z))
+print(bh_threshold)
+print(bh_threshold_param)
+print(bh_threshold_z)
+print(bh_threshold_pop_z)
+```
+
+
+# summarize discoveries
+
+```{r}
+bh_out_dir <- file.path("results/discovery_sets_bh", "bh")
+bh_snp_dir <- file.path(bh_out_dir, "snp_ids")
+bh_chr_pos_dir <- file.path(bh_out_dir, "chromosome_position")
+
+dir.create(bh_snp_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(bh_chr_pos_dir, recursive = TRUE, showWarnings = FALSE)
+
+write_bh_discovery_files <- function(flag, snp_file, chr_pos_file) {
+  discovery_rows <- sumstats_clean[flag, ]
+  
+  write.table(
+    data.frame(SNP = discovery_rows$SNP),
+    file = file.path(bh_snp_dir, snp_file),
+    sep = "\t",
+    quote = FALSE,
+    row.names = FALSE
+  )
+  
+  write.table(
+    data.frame(
+      chromosome = discovery_rows$chromosome,
+      pos = discovery_rows$pos
+    ),
+    file = file.path(bh_chr_pos_dir, chr_pos_file),
+    sep = "\t",
+    quote = FALSE,
+    row.names = FALSE
+  )
+  
+  data.frame(
+    file_prefix = sub("_discoveries_snp_ids\\.txt$", "", snp_file),
+    n_discoveries = nrow(discovery_rows),
+    n_rsids = sum(grepl("^rs", discovery_rows$SNP)),
+    n_non_rsids = sum(!grepl("^rs", discovery_rows$SNP))
+  )
+}
+
+bh_discovery_summary <- rbind(
+  write_bh_discovery_files(
+    significance,
+    "npmle_discoveries_snp_ids.txt",
+    "npmle_discoveries_chr_pos.txt"
+  ),
+  write_bh_discovery_files(
+    significance_param,
+    "parametric_discoveries_snp_ids.txt",
+    "parametric_discoveries_chr_pos.txt"
+  ),
+  write_bh_discovery_files(
+    significance_z,
+    "z_test_discoveries_snp_ids.txt",
+    "z_test_discoveries_chr_pos.txt"
+  ),
+  write_bh_discovery_files(
+    significance_pop_z,
+    "population_z_test_discoveries_snp_ids.txt",
+    "population_z_test_discoveries_chr_pos.txt"
+  )
+)
+
+bh_discovery_summary$bh_threshold <- c(
+  bh_threshold,
+  bh_threshold_param,
+  bh_threshold_z,
+  bh_threshold_pop_z
+)
+
+bh_discovery_summary
+```
+
+
+
+## Manhattan plot
+```{r}
+manhattan_base_df <- data.frame(
+  chromosome = as.integer(sumstats_clean$chromosome),
+  pos = as.numeric(sumstats_clean$pos),
+  SNP = sumstats_clean$SNP
+)
+
+manhattan_base_df <- manhattan_base_df[order(manhattan_base_df$chromosome, manhattan_base_df$pos), ]
+
+chromosome_offsets <- aggregate(pos ~ chromosome, manhattan_base_df, max)
+chromosome_offsets <- chromosome_offsets[order(chromosome_offsets$chromosome), ]
+chromosome_offsets$offset <- c(0, cumsum(head(chromosome_offsets$pos, -1)))
+
+manhattan_base_df <- merge(
+  manhattan_base_df,
+  chromosome_offsets[, c("chromosome", "offset")],
+  by = "chromosome"
+)
+manhattan_base_df$genome_pos <- manhattan_base_df$pos + manhattan_base_df$offset
+
+chromosome_axis_df <- aggregate(genome_pos ~ chromosome, manhattan_base_df, function(x) mean(range(x)))
+
+manhattan_p_values <- data.frame(
+  chromosome = rep(as.integer(sumstats_clean$chromosome), 4),
+  pos = rep(as.numeric(sumstats_clean$pos), 4),
+  SNP = rep(sumstats_clean$SNP, 4),
+  p_value = c(p_set_param, p_set, p_set_z, p_set_pop_z),
+  method = factor(
+    rep(c("RB-Normal", "RB-NPMLE", "Direct-effect", "Population-effect"), each = length(p_set)),
+    levels = c("RB-Normal", "RB-NPMLE", "Direct-effect", "Population-effect")
+  )
+)
+
+manhattan_df <- merge(
+  manhattan_p_values,
+  manhattan_base_df[, c("chromosome", "pos", "SNP", "genome_pos")],
+  by = c("chromosome", "pos", "SNP")
+)
+manhattan_p_floor <- 1e-50
+manhattan_df$plot_p_value <- pmax(manhattan_df$p_value, manhattan_p_floor)
+manhattan_df$minus_log10_p <- -log10(manhattan_df$plot_p_value)
+bh_threshold_df <- data.frame(
+  method = factor(
+    c("RB-Normal", "RB-NPMLE", "Direct-effect", "Population-effect"),
+    levels = c("RB-Normal", "RB-NPMLE", "Direct-effect", "Population-effect")
+  ),
+  bh_threshold = c(bh_threshold_param, bh_threshold, bh_threshold_z, bh_threshold_pop_z)
+)
+manhattan_df <- merge(manhattan_df, bh_threshold_df, by = "method")
+manhattan_df$plot_color <- ifelse(
+  !is.na(manhattan_df$bh_threshold) &
+    manhattan_df$p_value <= manhattan_df$bh_threshold,
+  as.character(manhattan_df$method),
+  "Not significant"
+)
+
+plot_manhattan <- ggplot(manhattan_df, aes(x = genome_pos, y = minus_log10_p, color = plot_color)) +
+  geom_point(size = 1.5, alpha = 0.65) +
+#   geom_hline(yintercept = -log10(5e-8), linetype = "dashed", color = "grey35", linewidth = 0.4) +
+  geom_hline(aes(yintercept = -log10(bh_threshold)), linetype = "dotted", color = "grey20", linewidth = 0.4, na.rm = TRUE) +
+  facet_grid(method ~ .) +
+  scale_color_manual(
+    values = c(
+      "Not significant" = "grey85",
+      "RB-NPMLE" = "#377eb8",
+      "RB-Normal" = "#e41a1c",
+      "Direct-effect" = "#ff7f00",
+      "Population-effect" = "#984ea3"
+    ),
+    name = NULL
+  ) +
+  scale_x_continuous(
+    breaks = chromosome_axis_df$genome_pos,
+    labels = chromosome_axis_df$chromosome,
+    expand = expansion(mult = c(0.01, 0.01))
+  ) +
+  labs(
+    x = "Chromosome",
+    y = expression(-log[10](italic(p)))
+  ) +
+  theme_classic(base_size = 16) +
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(color = "black"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.8),
+    legend.position = "none",
+    strip.background = element_blank(),
+    strip.text.y = element_text(face = "bold", angle = 0, size = 18),
+    axis.text.x = element_text(color = "black", size = 11, angle = 45, hjust = 1, vjust = 1)
+  )
+
+print(plot_manhattan)
+ggsave('manhattan-stacked.png', plot_manhattan, width = 11.5, height = 7)
+# ggsave('manhattan-stacked.pdf', plot_manhattan, width = 11.5, height = 7)
+```

@@ -1,0 +1,377 @@
+---
+title: "Analysis"
+format: html
+---
+
+
+
+```{r}
+library(data.table)
+library(ieugwasr)
+source("check_overlap.R")
+
+plink2_bin <- Sys.getenv("PLINK2", unset = "plink2")
+bfile <- "ldref/1000G/EUR.chrpos"
+```
+
+
+# check LD overlap with Howe et al.
+
+```{r}
+howe <- tophits(
+  id = 'ieu-b-4813',
+  pval = 1e-6,
+  clump = 0,
+  pop = 'EUR'
+)
+
+res_pop_z <- run_howe_overlap(
+    howe = howe,
+    method = 'population_z_test',
+    procedure = 'bh',
+    pval = 1e-6
+)
+res_z <- run_howe_overlap(
+    howe = howe,
+    method = 'z_test',
+    procedure = 'bh',
+    pval = 1e-6
+)
+
+res_npmle <- run_howe_overlap(
+    howe = howe,
+    method = 'npmle',
+    procedure = 'bh',
+    pval = 1e-6
+)
+
+res_param <- run_howe_overlap(
+    howe = howe,
+    method = 'parametric',
+    procedure = 'bh',
+    pval = 1e-6
+)
+
+res_npmle$summary_table
+res_param$summary_table
+res_z$summary_table
+res_pop_z$summary_table
+```
+
+
+## random 5,000
+
+```{r}
+set.seed(20260505)
+
+random_5000_n_iter <- 50
+random_5000_n_snps <- 5000
+random_5000_procedure <- "random_5000"
+random_5000_base_dir <- file.path("results", "random_5000_discovery_sets")
+random_5000_out_dir <- file.path("results", "random_5000_howe_overlap")
+
+dir.create(
+  file.path(random_5000_base_dir, random_5000_procedure, "chromosome_position"),
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+dir.create(
+  file.path(random_5000_base_dir, random_5000_procedure, "snp_ids"),
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+dir.create(random_5000_out_dir, recursive = TRUE, showWarnings = FALSE)
+
+sumstats <- fread("height_matched_to_1000GEUR.sumstats")
+sumstats[, `:=`(
+  chromosome = as.integer(chromosome),
+  pos = as.integer(pos),
+  chr_pos = paste0(chromosome, ":", pos)
+)]
+
+bim <- fread(paste0(bfile, ".bim"), header = FALSE)
+setnames(bim, c("chr", "chr_pos", "cm", "bp", "a1", "a2"))
+
+random_5000_pool <- unique(
+  sumstats[chr_pos %in% bim$chr_pos, .(chromosome, pos, SNP, chr_pos)],
+  by = "chr_pos"
+)
+
+stopifnot(nrow(random_5000_pool) >= random_5000_n_snps)
+
+
+random_5000_results <- lapply(seq_len(random_5000_n_iter), function(iter) {
+  method_name <- sprintf("random_5000_iter_%02d", iter)
+  random_set <- random_5000_pool[
+    sample.int(.N, random_5000_n_snps),
+    .(chromosome, pos, SNP)
+  ]
+  
+  fwrite(
+    random_set[, .(chromosome, pos)],
+    file.path(
+      random_5000_base_dir,
+      random_5000_procedure,
+      "chromosome_position",
+      paste0(method_name, "_discoveries_chr_pos.txt")
+    ),
+    sep = "\t"
+  )
+  fwrite(
+    random_set[, .(SNP)],
+    file.path(
+      random_5000_base_dir,
+      random_5000_procedure,
+      "snp_ids",
+      paste0(method_name, "_discoveries_snp_ids.txt")
+    ),
+    sep = "\t"
+  )
+  
+  res <- run_howe_overlap(
+    howe = howe,
+    method = method_name,
+    procedure = random_5000_procedure,
+    base_dir = random_5000_base_dir,
+    out_dir = random_5000_out_dir,
+    bfile = bfile,
+    ld_window_kb = 250,
+    ld_window_r2 = 0.8
+  )
+  
+  res$summary_table[, iteration := iter]
+  res$summary_table
+})
+
+random_5000_summary <- rbindlist(random_5000_results, use.names = TRUE, fill = TRUE)
+
+random_5000_average <- random_5000_summary[
+  ,
+  .(
+    mean_count = mean(count),
+    sd_count = sd(count),
+    min_count = min(count),
+    max_count = max(count)
+  ),
+  by = category
+]
+
+random_5000_average[
+  category %in% c(
+    "Discovery SNPs exact-matched to Howe",
+    "Discovery SNPs non-exact LD-proxy matched to Howe",
+    "Discovery SNPs exact or non-exact LD-proxy matched to Howe"
+  )
+]
+```
+
+# LD clump discovery sets, then match clumped discoveries to Howe
+
+```{r}
+clump_input_base_dir <- "results/discovery_sets_bh"
+clump_output_base_dir <- file.path("results", "clumped_discovery_sets")
+clump_plink_out_dir <- file.path("results", "discovery_clumping_plink")
+clumped_howe_overlap_out_dir <- file.path("results", "clumped_discovery_howe_overlap")
+
+dir.create(clump_output_base_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(clump_plink_out_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(clumped_howe_overlap_out_dir, recursive = TRUE, showWarnings = FALSE)
+
+clump_discovery_set <- function(
+    method,
+    procedure = "bh",
+    input_base_dir = clump_input_base_dir,
+    output_base_dir = clump_output_base_dir,
+    plink_out_dir = clump_plink_out_dir,
+    plink2_bin = NULL,
+    ref_bfile = NULL,
+    clump_kb = 250,
+    clump_r2 = 0.1) {
+  if (is.null(plink2_bin)) {
+    plink2_bin <- get("plink2_bin", envir = parent.frame())
+  }
+  if (is.null(ref_bfile)) {
+    ref_bfile <- get("bfile", envir = parent.frame())
+  }
+  
+  disc_file <- file.path(
+    input_base_dir,
+    procedure,
+    "chromosome_position",
+    paste0(method, "_discoveries_chr_pos.txt")
+  )
+  
+  disc <- fread(disc_file)
+  disc[, `:=`(
+    chromosome = as.integer(chromosome),
+    pos = as.integer(pos),
+    chr_pos = paste0(chromosome, ":", pos)
+  )]
+  disc <- unique(disc, by = "chr_pos")
+  
+  bim <- fread(paste0(ref_bfile, ".bim"), header = FALSE)
+  setnames(bim, c("chr", "chr_pos", "cm", "bp", "a1", "a2"))
+  
+  disc_in_ref <- disc[chr_pos %in% bim$chr_pos]
+  
+  assoc_file <- file.path(plink_out_dir, paste0(method, "_", procedure, "_clump_input.tsv"))
+  extract_file <- file.path(plink_out_dir, paste0(method, "_", procedure, "_extract.txt"))
+  out_prefix <- file.path(plink_out_dir, paste0(method, "_", procedure, "_clumped"))
+  
+  ## Discovery files only contain coordinates. Use a constant small P-value
+  ## so PLINK can LD-clump the set; ties are resolved by PLINK/input order.
+  fwrite(
+    data.table(
+      ID = disc_in_ref$chr_pos,
+      P = 1e-12
+    ),
+    assoc_file,
+    sep = "\t"
+  )
+  writeLines(disc_in_ref$chr_pos, extract_file)
+  
+  plink_args <- c(
+    "--bfile", ref_bfile,
+    "--extract", extract_file,
+    "--clump", assoc_file,
+    "--clump-id-field", "ID",
+    "--clump-p-field", "P",
+    "--clump-p1", "1",
+    "--clump-p2", "1",
+    "--clump-r2", as.character(clump_r2),
+    "--clump-kb", as.character(clump_kb),
+    "--clump-unphased",
+    "--out", out_prefix
+  )
+  
+  status <- system2(plink2_bin, args = plink_args)
+  if (status != 0) {
+    stop("PLINK clumping failed. Check log file: ", paste0(out_prefix, ".log"))
+  }
+  
+  clump_file <- paste0(out_prefix, ".clumps")
+  if (!file.exists(clump_file)) {
+    stop("Expected PLINK clump output not found: ", clump_file)
+  }
+  
+  clumped <- fread(clump_file)
+  clumped_ids <- unique(clumped$ID)
+  
+  clumped_chr_pos <- tstrsplit(clumped_ids, ":", fixed = TRUE)
+  clumped_disc <- data.table(
+    chromosome = as.integer(clumped_chr_pos[[1]]),
+    pos = as.integer(clumped_chr_pos[[2]])
+  )
+  
+  clumped_chr_pos_dir <- file.path(output_base_dir, procedure, "chromosome_position")
+  clumped_snp_dir <- file.path(output_base_dir, procedure, "snp_ids")
+  dir.create(clumped_chr_pos_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(clumped_snp_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  fwrite(
+    clumped_disc,
+    file.path(clumped_chr_pos_dir, paste0(method, "_discoveries_chr_pos.txt")),
+    sep = "\t"
+  )
+  fwrite(
+    data.table(SNP = clumped_ids),
+    file.path(clumped_snp_dir, paste0(method, "_discoveries_snp_ids.txt")),
+    sep = "\t"
+  )
+  
+  data.table(
+    method = method,
+    procedure = procedure,
+    clump_kb = clump_kb,
+    clump_r2 = clump_r2,
+    n_discoveries = uniqueN(disc$chr_pos),
+    n_discoveries_in_ref = uniqueN(disc_in_ref$chr_pos),
+    n_clumped_discoveries = uniqueN(clumped_ids),
+    clumped_file = clump_file
+  )
+}
+
+clump_procedure <- "bh"
+clump_methods <- c(
+  "npmle",
+  "parametric",
+  "z_test",
+  "population_z_test"
+)
+
+clumped_discovery_summary <- rbindlist(lapply(clump_methods, function(method_name) {
+  clump_discovery_set(
+    method = method_name,
+    procedure = clump_procedure,
+    clump_kb = 250,
+    clump_r2 = 0.1
+  )
+}), use.names = TRUE)
+
+
+clumped_discovery_summary
+```
+
+```{r}
+howe_for_clumped_overlap <- tophits(
+  id = "ieu-b-4813",
+  pval = 1e-6,
+  clump = 0,
+  pop = "EUR"
+)
+
+clumped_howe_overlap_results <- lapply(clump_methods, function(method_name) {
+  run_howe_overlap(
+    howe = howe_for_clumped_overlap,
+    method = method_name,
+    procedure = clump_procedure,
+    base_dir = clump_output_base_dir,
+    out_dir = clumped_howe_overlap_out_dir,
+    ld_window_kb = 250,
+    ld_window_r2 = 0.8
+  )
+})
+
+names(clumped_howe_overlap_results) <- clump_methods
+
+clumped_howe_overlap_summary <- rbindlist(lapply(
+  clumped_howe_overlap_results,
+  function(x) x$summary_table
+), use.names = TRUE, fill = TRUE)
+
+clumped_howe_overlap_summary
+```
+
+```{r}
+clumped_howe_overlap_breakdown <- rbindlist(lapply(names(clumped_howe_overlap_results), function(method_name) {
+  res <- clumped_howe_overlap_results[[method_name]]
+  n_after_clumping <- clumped_discovery_summary[
+    method == method_name,
+    n_clumped_discoveries
+  ][1]
+  
+  exact_and_ld <- intersect(res$exact_overlap, res$ld_matched_discovery)
+  exact_only <- setdiff(res$exact_overlap, res$ld_matched_discovery)
+  ld_only <- setdiff(res$ld_matched_discovery, res$exact_overlap)
+  
+  data.table(
+    method = method_name,
+    category = c(
+      "Discovery SNPs after clumping",
+      "Exact only",
+      "Non-exact LD-proxy only",
+      "Both exact and non-exact LD-proxy",
+      "Exact or non-exact LD-proxy"
+    ),
+    count = c(
+      n_after_clumping,
+      length(exact_only),
+      length(ld_only),
+      length(exact_and_ld),
+      length(res$matched_discovery)
+    )
+  )
+}), use.names = TRUE)
+
+clumped_howe_overlap_breakdown
+```

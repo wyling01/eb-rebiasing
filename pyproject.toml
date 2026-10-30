@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tide-code"
+version = "0.1.0"
+description = "Focused, self-contained LMArena CI reproduction bundle."
+requires-python = ">=3.9,<3.14"
+dependencies = [
+    "matplotlib>=3.7",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.11",
+    "tqdm>=4.66",
+    "npeb>=0.0.2",
+    "cvxpy>=1.4",
+    "mosek>=11",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
