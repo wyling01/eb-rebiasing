@@ -8,8 +8,7 @@ For self-contained reproducibility, this repository includes the PAS
 (Prediction-Powered Adaptive Shrinkage) components required by our experiments
 under `src/pas/`. The original PAS implementation is available at
 [Prediction-Powered Adaptive Shrinkage](https://github.com/listar2000/prediction-powered-adaptive-shrinkage).
-The local version has been adapted for the confidence-interval experiments and
-empirical Bayes comparisons in this paper.
+The local version has been adapted for the experiments in this paper.
 
 ## Setup
 
