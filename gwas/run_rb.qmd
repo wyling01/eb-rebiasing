@@ -109,7 +109,7 @@ the following CSV files under `results/`.
 - `gwas_bias_se_pt.csv`
 - `gwas_npmle_pt.csv`
 - `gwas_param_pt.csv`
-- `height_gwas_bias_nuisance.csv`
+- `height_gwas_bias_nuisance_diagnostics.csv`
 
 ```{r}
 #| label: export-gwas-csv
@@ -137,7 +137,7 @@ csv_exports <- list(
     hat_mu_b = parametric_prior$hat_mu_b,
     hat_var_b = parametric_prior$hat_var_b
   ),
-  height_gwas_bias_nuisance.csv = data.frame(
+  height_gwas_bias_nuisance_diagnostics.csv = data.frame(
     bias_hat = hat_delta_g_set,
     rho = corr_set,
     tau2 = se_delta_set^2,

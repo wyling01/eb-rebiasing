@@ -7,19 +7,18 @@ tracked by git):
     summary.csv  -- mean/SE per (alpha, method)
     meta.json    -- run config (trials, num_workers, methods, etc.)
 
-The plot and the appendix table are produced by separate scripts that
-load `raw.csv`, so plot/table iteration does not require re-running the
-experiment.
+The confidence-interval plot is produced by a separate script that loads
+`summary.csv`, so plot iteration does not require re-running the experiment.
 
 Usage (from repo root):
 
     MOSEKLM_LICENSE_FILE=/path/to/mosek.lic \
-        uv run python scripts/run_lmarena_ci.py --trials 200 --num-workers 4
+        python scripts/run_lmarena_ci.py --trials 200 --num-workers 4
 
-The PPI/PT baselines, the two robust empirical-Bayes competitors (robust
-EBCI and double shrinkage), and the LMArena dataset come from the upstream
-``pas`` package. The rebiased estimators (PT-Param, PT-NPMLE) come from
-``eb_rebiasing`` and auto-register on import.
+The PPI/PT baselines, the robust empirical-Bayes competitors, and the LMArena
+dataset come from the self-contained ``pas`` code in this repository. The
+rebiased estimators (PT-Param, PT-NPMLE) come from ``eb_rebiasing`` and
+auto-register on import.
 """
 from __future__ import annotations
 
@@ -50,11 +49,8 @@ from pas.intervals import CORE_CI_METHODS
 # inverse-variance-weighted grand mean of the base estimates across tasks (the
 # alternative, `shrink_to="zero"`, shrinks toward 0 instead).
 #
-# `cv_mode="exact"` solves the robust critical value per task instead of
-# reading it off the packaged lookup table. The tables round m2 (and kappa)
-# *up*, which would widen this competitor baseline by ~1% on average -- a
-# systematic bias in our own favour. Exact mode costs ~12s per replicate,
-# small next to the NPMLE method.
+# `cv_mode="exact"` computes robust critical values directly, avoiding the
+# discretization introduced by a lookup grid.
 _ROBUST_EB_COMMON = {
     "share_var": False,
     "weights": "inverse_variance",
@@ -82,20 +78,6 @@ METHOD_SPECS = {
                                {"base_estimator": "classical", **_ROBUST_EB_COMMON}),
     "eb_pt_ci":               ("eb_pt_ci", {}),                  # PT-Param  (ours)
     "eb_npmle_pt_ci":         ("eb_npmle_pt_ci", {"u": 50}),            # PT-NPMLE  (ours)
-    # Double shrinkage (Rosenman et al. 2023) was dropped from the headline
-    # comparison in favour of the two robust-EBCI variants above. Re-enable by
-    # uncommenting; the method is still registered upstream.
-    # "double_shrinkage_mle_ci": ("double_shrinkage_mle_ci",
-    #                             {"center": 0.5,
-    #                              "finite_sample_correction": "pmt",
-    #                              "cv_mode": "exact"}),
-    # Other rebiased flavours / double-shrinkage hyperparameter variants kept
-    # for ablations; uncomment to enable:
-    # "double_shrinkage_mm1_ci": ("double_shrinkage_mm1_ci", {}),
-    # "double_shrinkage_mm2_ci": ("double_shrinkage_mm2_ci", {}),
-    # "double_shrinkage_ure_ci": ("double_shrinkage_ure_ci", {}),
-    # "eb_ppi_ci":              ("eb_ppi_ci", {}),
-    # "eb_npmle_ppi_ci":        ("eb_npmle_ppi_ci", {}),
 }
 
 RUN_METHODS = list(METHOD_SPECS)

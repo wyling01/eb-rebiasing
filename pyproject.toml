@@ -3,9 +3,9 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tide-code"
+name = "eb-rebiasing"
 version = "0.1.0"
-description = "Focused, self-contained LMArena CI reproduction bundle."
+description = "Reproduction code for Empirical Bayes Rebiasing."
 requires-python = ">=3.9,<3.14"
 dependencies = [
     "matplotlib>=3.7",

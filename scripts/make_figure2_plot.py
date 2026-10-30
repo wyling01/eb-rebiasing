@@ -1,6 +1,6 @@
 """Render Figure 2 from the LMArena, Amazon, and GWAS plotting data.
 
-Run from the tide_code repository root. Each panel reads from its own results
+Run from the repository root. Each panel reads from its own results
 directory.
 """
 from __future__ import annotations
@@ -26,12 +26,7 @@ SAVE_DPI = 150
 PARAM_COLOR = "firebrick"
 NPMLE_COLOR = "steelblue"
 
-# Per-panel tuning (histogram bins / spike-height scaling) carried over
-# from the original colleague notebook so the visuals stay comparable.
-# ``param_spike_height`` only fires for GWAS, where the fitted Gaussian
-# prior has near-zero variance and is best rendered as a single spike.
-# ``sample_n`` down-samples the bias vector before computing the
-# expensive per-row marginal density (only relevant for GWAS).
+# Per-panel tuning for histogram bins and spike-height scaling.
 PANEL_CONFIG = [
     dict(
         key="lmarena",  title="(a) LMArena",

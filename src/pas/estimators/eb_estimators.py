@@ -8,7 +8,7 @@ from scipy.optimize import minimize
 
 
 # ---------------------------------------------------------------------------
-# Helpers (also used by intervals/eb_cis.py)
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _get_generic_ppi_estimators_plus_bias(

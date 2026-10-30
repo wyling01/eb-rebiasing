@@ -162,7 +162,7 @@ load_data_amazon <- function(file, r, seed = NULL) {
   if (length(keys) == 0L) stop("No root-level datasets found.")
   
   rows <- lapply(keys, function(k) {
-    m <- rhdf5::h5read(file, paste0("/", k))  # exactly your call
+    m <- rhdf5::h5read(file, paste0("/", k))
     if (!is.matrix(m) || ncol(m) < 2)
       stop(sprintf("Dataset '%s' is not a 2-column matrix.", k))
     Y <- as.numeric(m[, 1])

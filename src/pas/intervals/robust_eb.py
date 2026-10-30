@@ -12,12 +12,9 @@ where ``m2`` bounds the second moment of the normalized conditional bias and
 the official repository so that PAS can reproduce the default ``ebci()``
 workflow, which estimates a finite ``kappa`` from the data.
 
-For the confidence levels used by the paper's experiments,
-:func:`robust_eb_critical_values` provides packaged lookup tables.  The
-finite-kurtosis table covers the range encountered in the rebuttal
-experiments; lookup rounds ``m2`` and ``kappa`` upward, while values outside
-the table fall back to the exact scalar solver.  ``mode="exact"`` always uses
-the source-equivalent solver.
+:func:`robust_eb_critical_values` uses the source-equivalent exact scalar
+solver by default. A legacy lookup mode is retained for compatibility and
+falls back to the exact solver when the optional lookup data are unavailable.
 """
 from __future__ import annotations
 
@@ -480,15 +477,14 @@ def robust_eb_critical_values(
     alpha: float = 0.05,
     kappa: float = np.inf,
     *,
-    mode: str = "lookup",
+    mode: str = "exact",
 ) -> np.ndarray:
     """Vectorized robust-EBCI critical values.
 
-    ``mode='lookup'`` rounds ``m2`` and, for finite kurtosis, ``kappa``
-    upward on packaged exact grids.  Monotonicity of the robust critical value
-    makes this conservative.  Values outside the finite grid fall back to the
-    exact scalar solver.  ``mode='exact'`` always calls
-    :func:`robust_eb_critical_value` elementwise.
+    The default ``mode='exact'`` calls :func:`robust_eb_critical_value`
+    elementwise. ``mode='lookup'`` is retained for compatibility; it uses
+    optional precomputed grids when available and otherwise falls back to the
+    exact solver.
     """
     arr = np.asarray(m2, dtype=float)
     kappa = float(kappa)
@@ -515,7 +511,25 @@ def robust_eb_critical_values(
         return out.reshape(arr.shape)
 
     if not np.isinf(kappa):
-        m2_grid, kappa_grid, alphas, table = _load_finite_lookup_table()
+        try:
+            m2_grid, kappa_grid, alphas, table = _load_finite_lookup_table()
+        except (ModuleNotFoundError, FileNotFoundError):
+            warnings.warn(
+                "Robust-EBCI lookup data are unavailable; using the exact "
+                "scalar solver.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            out = np.array(
+                [
+                    robust_eb_critical_value(
+                        float(x), alpha=float(alpha), kappa=kappa
+                    )
+                    for x in flat
+                ],
+                dtype=float,
+            )
+            return out.reshape(arr.shape)
         alpha_idx = np.flatnonzero(
             np.isclose(alphas, alpha, rtol=0.0, atol=1e-12)
         )
@@ -540,8 +554,7 @@ def robust_eb_critical_values(
                     )
                 return out.reshape(arr.shape)
 
-        # The packaged finite table deliberately covers the common experiment
-        # range.  Outside that range we retain exact source-method behavior.
+        # Outside the optional grid, retain exact source-method behavior.
         out = np.array(
             [
                 robust_eb_critical_value(
@@ -553,11 +566,27 @@ def robust_eb_critical_values(
         )
         return out.reshape(arr.shape)
 
-    m2_grid, alphas, table = _load_lookup_table()
+    try:
+        m2_grid, alphas, table = _load_lookup_table()
+    except (ModuleNotFoundError, FileNotFoundError):
+        warnings.warn(
+            "Robust-EBCI lookup data are unavailable; using the exact scalar "
+            "solver.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        out = np.array(
+            [
+                robust_eb_critical_value(float(x), float(alpha), np.inf)
+                for x in flat
+            ],
+            dtype=float,
+        )
+        return out.reshape(arr.shape)
     alpha_idx = np.flatnonzero(np.isclose(alphas, alpha, rtol=0.0, atol=1e-12))
     if alpha_idx.size == 0:
         warnings.warn(
-            "No packaged robust-EBCI lookup table for alpha="
+            "No robust-EBCI lookup data for alpha="
             f"{alpha}; using the exact scalar solver.",
             RuntimeWarning,
             stacklevel=2,

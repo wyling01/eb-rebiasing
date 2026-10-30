@@ -47,7 +47,7 @@ the CSV files listed below under `results/`.
 | `gwas_bias_se_pt.csv` | `bias`, `bias_sd` |
 | `gwas_npmle_pt.csv` | `atom`, `weight` |
 | `gwas_param_pt.csv` | `hat_mu_b`, `hat_var_b` |
-| `height_gwas_bias_nuisance.csv` | `bias_hat`, `rho`, `tau2`, `sigma2` |
+| `height_gwas_bias_nuisance_diagnostics.csv` | `bias_hat`, `rho`, `tau2`, `sigma2` |
 
 ## Simulation study under realistic LD
 

@@ -1,4 +1,4 @@
-"""Generate the LM Arena prior and bias data used by the plotting notebooks."""
+"""Generate the LM Arena prior and bias data used by the plotting scripts."""
 from __future__ import annotations
 
 import argparse

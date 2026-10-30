@@ -13,7 +13,7 @@ The PAS-facing default uses the power-tuned PPI estimator as ``Y_i``, shrinks
 toward its inverse-variance-weighted grand mean (the R formula ``Y ~ 1``),
 uses weights ``1 / se_i^2``, and applies the official posterior-mean
 truncation finite-sample correction (``fs_correction='PMT'``).  Those defaults
-match the configuration used by the first author for the rebuttal baseline.
+match the configuration used for the robust-EBCI baseline.
 
 The moment formulas are ported from ``R/eb.R`` in the MIT-licensed official
 ``ebci`` repository.  See ``THIRD_PARTY_NOTICES.md``.
